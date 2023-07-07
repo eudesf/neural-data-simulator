@@ -13,7 +13,7 @@ from neural_data_simulator.inputs import LSLInput
 from neural_data_simulator.outputs import LSLOutputDevice
 from neural_data_simulator.timing import Timer
 from neural_data_simulator.util.buffer import RingBuffer
-
+from neural_data_simulator.util.circular_dequeue import CircularDeque
 
 class SpikeRateInput(Protocol):
     """An abstract input that can be used to read spike rates.
@@ -466,6 +466,19 @@ class Waveforms:
         unit_waveforms *= np.random.uniform(0.5, 1.0, size=self.n_units)
         return unit_waveforms
 
+class SpikesAverage:
+
+    def __init__(self, max_samples: int):
+        self.num_samples_buffer = CircularDeque(max_samples)
+
+    def add_spikes(self, spikes: ndarray):
+        self.num_samples_buffer.append(np.count_nonzero(spikes))
+    
+    def average(self) -> float:
+        buf_list = self.num_samples_buffer.to_list()
+        print('num_samples_buffer = ', buf_list)
+        return np.average(buf_list)
+    
 
 class Spikes:
     """Spike generator.
@@ -516,8 +529,18 @@ class Spikes:
             n_channels=self.n_units,
         )
         self.spikes_buffer.add(np.zeros((self.n_refractory_samples, self.n_units)))
+        self.spikes_average = SpikesAverage(10)
 
     def _get_spikes(self, rates: ndarray, n_samples: int) -> ndarray:
+        # r = np.random.random(
+        #     (n_samples, self.n_units)
+        # )
+        # print('n_samples=', n_samples, 'n_units', self.n_units)
+        # print('random = ', r)
+        # print('random[0].size=', r[0].size)
+        # # print('spike_chance_for_rate =', self._get_spike_chance_for_rate(rates))
+        # print('spike_chance_for_rate size = ', self._get_spike_chance_for_rate(rates).size)
+
         return np.random.random(
             (n_samples, self.n_units)
         ) < self._get_spike_chance_for_rate(rates)
@@ -590,8 +613,19 @@ class Spikes:
         Returns:
             The generated spikes as :class:`SpikeEvents`.
         """
+
+        # AVERAGE_THRESHOLD = 0.8
+        # self.spikes_average.add_spikes(rates)
+        # average = self.spikes_average.average()
+        # if average > AVERAGE_THRESHOLD:
+        #     print('spikes_average.average() = ', average)
+
+
         spikes = self._get_spikes(rates, n_samples)
+        # print("_get_spikes  = ", spikes)
+
         spikes = self._add_last_chunk_refractory_period(spikes)
+        # print("_add_last_chunk_refractory_period  = ", spikes)
         units, time_idx = np.where(spikes.T)
         spikes, units, time_idx = self._remove_spikes_in_refractory_period(
             spikes, units, time_idx
@@ -708,23 +742,56 @@ class ProcessOutput:
         self._update_spike_rates()
         if self._last_output_time is None:
             self._last_output_time = pylsl.local_clock()
+            self._weight = 30000
             return
 
         time_now = pylsl.local_clock()
         time_elapsed = time_now - self._last_output_time
         self._last_output_time = time_now
 
-        n_samples = np.rint(self._params.raw_data_frequency * time_elapsed).astype(int)
-        self._health_checker.record_processed_samples(n_samples)
+        # time_elapsed = 0.001
+        start_time = time_now
 
+        # print('======================')
+        # print('weight = ', self._weight)
+        # self.rates *= self._weight
+        # self._weight += 10
+        # if self._weight > 100:
+        #     self._weight = 1
+
+        # step_start = pylsl.local_clock()
+        n_samples = np.rint(self._params.raw_data_frequency * time_elapsed).astype(int)
+        # print('step nsamples = ', 1000 * (pylsl.local_clock() - step_start))
+
+        # step_start = pylsl.local_clock()
+        self._health_checker.record_processed_samples(n_samples)
+        # print('step record_processed_samples = ', pylsl.local_clock() - step_start)
+
+        # step_start = pylsl.local_clock()
         spike_events = self.spikes.generate_spikes(self.rates, n_samples)
+        # print('step generate_spikes = ', 1000 * (pylsl.local_clock() - step_start))
+
+        # step_start = pylsl.local_clock()
         continuous_data = self.continuous_data.get_continuous_data(
             n_samples, spike_events
         )
+        # print('step get_continuous_data = ', 1000 * (pylsl.local_clock() - step_start))
 
+        # step_start = pylsl.local_clock()
         self._stream_continuous_data(continuous_data)
+        # print('step stream continuous_data = ', 1000 * (pylsl.local_clock() - step_start))
+
+        # step_start = pylsl.local_clock()
         self._stream_lfp(continuous_data)
+        # print('step stream lfp = ', 1000 * (pylsl.local_clock() - step_start))
+
+        # step_start = pylsl.local_clock()
         self._stream_spike_events(spike_events, n_samples, time_elapsed)
+        # print('step stream spike events = ', 1000 * (pylsl.local_clock() - step_start))
+
+        end_time = pylsl.local_clock()
+
+        print('total time elapsed = ', 1000 * (end_time - start_time))
 
     def _stream_continuous_data(self, continuous_data: ndarray):
         if self._outputs.raw is not None:
