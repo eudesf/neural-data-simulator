@@ -640,6 +640,8 @@ class Spikes:
     def _get_spike_chance_for_rate(self, spk_per_sec: ndarray) -> ndarray:
         return spk_per_sec / self._params.raw_data_frequency
 
+def show_log(*args):
+    print(*args)
 
 class ProcessOutput:
     """Process that reads spike rates and outputs spiking data.
@@ -715,7 +717,7 @@ class ProcessOutput:
         n_units = self._input.channel_count * self._params.n_units_per_channel
         self.rates = np.zeros(n_units).astype(int)
 
-        self._timer = Timer(self._params.lsl_chunk_interval)
+        self._timer = Timer(1) # Timer(self._params.lsl_chunk_interval)
         self._should_stop = False
 
     def start(self):
@@ -752,46 +754,46 @@ class ProcessOutput:
         # time_elapsed = 0.001
         start_time = time_now
 
-        # print('======================')
+        show_log('======================')
         # print('weight = ', self._weight)
         # self.rates *= self._weight
         # self._weight += 10
         # if self._weight > 100:
         #     self._weight = 1
 
-        # step_start = pylsl.local_clock()
+        step_start = pylsl.local_clock()
         n_samples = np.rint(self._params.raw_data_frequency * time_elapsed).astype(int)
-        # print('step nsamples = ', 1000 * (pylsl.local_clock() - step_start))
+        show_log('step nsamples = ', 1000 * (pylsl.local_clock() - step_start))
 
-        # step_start = pylsl.local_clock()
+        step_start = pylsl.local_clock()
         self._health_checker.record_processed_samples(n_samples)
-        # print('step record_processed_samples = ', pylsl.local_clock() - step_start)
+        show_log('step record_processed_samples = ', pylsl.local_clock() - step_start)
 
-        # step_start = pylsl.local_clock()
+        step_start = pylsl.local_clock()
         spike_events = self.spikes.generate_spikes(self.rates, n_samples)
-        # print('step generate_spikes = ', 1000 * (pylsl.local_clock() - step_start))
+        show_log('step generate_spikes = ', 1000 * (pylsl.local_clock() - step_start))
 
-        # step_start = pylsl.local_clock()
+        step_start = pylsl.local_clock()
         continuous_data = self.continuous_data.get_continuous_data(
             n_samples, spike_events
         )
-        # print('step get_continuous_data = ', 1000 * (pylsl.local_clock() - step_start))
+        show_log('step get_continuous_data = ', 1000 * (pylsl.local_clock() - step_start))
 
-        # step_start = pylsl.local_clock()
+        step_start = pylsl.local_clock()
         self._stream_continuous_data(continuous_data)
-        # print('step stream continuous_data = ', 1000 * (pylsl.local_clock() - step_start))
+        show_log('step stream continuous_data = ', 1000 * (pylsl.local_clock() - step_start))
 
-        # step_start = pylsl.local_clock()
+        step_start = pylsl.local_clock()
         self._stream_lfp(continuous_data)
-        # print('step stream lfp = ', 1000 * (pylsl.local_clock() - step_start))
+        show_log('step stream lfp = ', 1000 * (pylsl.local_clock() - step_start))
 
-        # step_start = pylsl.local_clock()
+        step_start = pylsl.local_clock()
         self._stream_spike_events(spike_events, n_samples, time_elapsed)
-        # print('step stream spike events = ', 1000 * (pylsl.local_clock() - step_start))
+        show_log('step stream spike events = ', 1000 * (pylsl.local_clock() - step_start))
 
         end_time = pylsl.local_clock()
 
-        print('total time elapsed = ', 1000 * (end_time - start_time))
+        show_log('total time elapsed = ', 1000 * (end_time - start_time))
 
     def _stream_continuous_data(self, continuous_data: ndarray):
         if self._outputs.raw is not None:
@@ -819,11 +821,12 @@ class ProcessOutput:
                 self._last_output_time
                 + spike_events.time_idx * time_interval_per_sample
             )
-
+            start_send = pylsl.local_clock()
             for i, data in enumerate(data_to_stream):
                 self._outputs.spike_events.send_as_sample(
                     data=data, timestamp=spike_lsl_times[i]
                 )
+            show_log('spike events send time = ', 1000 * (pylsl.local_clock() - start_send), 's', 'n = ', data_to_stream.size)
 
     def _stream_lfp(self, continuous_data: ndarray):
         if self._outputs.lfp is not None:
